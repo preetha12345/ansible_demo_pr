@@ -1,0 +1,7 @@
+  - name: Install Cowsay
+    hosts: all
+    tasks:
+      - name: Install Cowsay
+        yum:
+          name: cowsay
+          state: present

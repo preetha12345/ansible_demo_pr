@@ -1,0 +1,246 @@
+---
+- name: Deploy Webserver
+  hosts: webservers
+  become: true
+  gather_facts: true
+  vars:
+    app_version: "default"
+    component_name: "WebServer-C3"
+    index_path: "{{ '/var/www/html/index.html' if ansible_os_family == 'Debian' else '/usr/share/nginx/html/index.html' }}"
+    index_owner: "{{ 'www-data' if ansible_os_family == 'Debian' else 'nginx' }}"
+    index_group: "{{ 'www-data' if ansible_os_family == 'Debian' else 'nginx' }}"
+
+  tasks:
+    - name: Update all packages (RedHat-based)
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+        update_cache: true
+      when: ansible_os_family == "RedHat"
+
+    - name: Update all packages (Debian-based)
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install nginx (Debian-based)
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install EPEL repository (Amazon Linux)
+      ansible.builtin.shell: amazon-linux-extras install epel -y
+      when: ansible_distribution == "Amazon"
+
+    - name: Install nginx (Amazon Linux)
+      ansible.builtin.shell: amazon-linux-extras install nginx1 -y
+      when: ansible_distribution == "Amazon"
+
+    - name: Install EPEL repository (RedHat/CentOS)
+      ansible.builtin.yum:
+        name: epel-release
+        state: present
+      when: ansible_os_family == "RedHat" and ansible_distribution != "Amazon"
+
+    - name: Install nginx (RedHat/CentOS)
+      ansible.builtin.yum:
+        name: nginx
+        state: present
+      when: ansible_os_family == "RedHat" and ansible_distribution != "Amazon"
+
+    - name: Verify nginx installation and location
+      ansible.builtin.shell: |
+        echo "=== Nginx Installation Verification ==="
+        if command -v nginx >/dev/null 2>&1; then
+          echo "✓ nginx found in PATH: $(which nginx)"
+          echo "✓ nginx version: $(nginx -v 2>&1)"
+        else
+          echo "✗ nginx not found in PATH"
+        fi
+        
+        echo "=== Searching for nginx binary ==="
+        find /usr -name "nginx" -type f 2>/dev/null || echo "No nginx binary found in /usr"
+        
+        echo "=== Checking nginx package ==="
+        if [ -f /etc/redhat-release ]; then
+          rpm -qa | grep nginx || echo "No nginx package found"
+        elif [ -f /etc/debian_version ]; then
+          dpkg -l | grep nginx || echo "No nginx package found"
+        fi
+        
+        echo "=== Checking nginx service ==="
+        systemctl status nginx.service || echo "nginx service not found/running"
+      register: nginx_verification
+      ignore_errors: true
+
+    - name: Display nginx verification results
+      ansible.builtin.debug:
+        msg: "{{ nginx_verification.stdout_lines }}"
+      when: nginx_verification.stdout_lines is defined
+
+    - name: Ensure nginx is running
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Create index.html with app version
+      ansible.builtin.copy:
+        dest: "{{ index_path }}"
+        content: |
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>{{ component_name }} - Version {{ app_version }}</title>
+              <style>
+                  body {
+                      font-family: Arial, sans-serif;
+                      margin: 0;
+                      padding: 0;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      display: flex;
+                      justify-content: center;
+                      align-items: center;
+                      height: 100vh;
+                  }
+                  .container {
+                      text-align: center;
+                      background: rgba(255, 255, 255, 0.1);
+                      padding: 2rem;
+                      border-radius: 15px;
+                      backdrop-filter: blur(10px);
+                      box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+                      border: 1px solid rgba(255, 255, 255, 0.18);
+                  }
+                  h1 {
+                      font-size: 3rem;
+                      margin: 0 0 1rem 0;
+                      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                  }
+                  .component {
+                      font-size: 1.8rem;
+                      font-weight: bold;
+                      color: #4fc3f7;
+                      text-shadow: 2px 2px 4px rgba(0,0,0,0.4);
+                      background: rgba(79, 195, 247, 0.2);
+                      padding: 0.5rem 1rem;
+                      border-radius: 8px;
+                      margin: 1rem 0;
+                      border: 2px solid #4fc3f7;
+                  }
+                  .version {
+                      font-size: 4rem;
+                      font-weight: bold;
+                      color: #ffeb3b;
+                      text-shadow: 3px 3px 6px rgba(0,0,0,0.5);
+                      background: rgba(255, 235, 59, 0.2);
+                      padding: 1rem 2rem;
+                      border-radius: 10px;
+                      margin: 1rem 0;
+                      border: 3px solid #ffeb3b;
+                      animation: pulse 2s infinite;
+                  }
+                  @keyframes pulse {
+                      0% { transform: scale(1); }
+                      50% { transform: scale(1.05); }
+                      100% { transform: scale(1); }
+                  }
+                  .info {
+                      font-size: 1.2rem;
+                      margin-top: 2rem;
+                      opacity: 0.9;
+                  }
+                  .timestamp {
+                      font-size: 0.9rem;
+                      margin-top: 1rem;
+                      opacity: 0.7;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🚀 Web Server Deployed</h1>
+                  <div class="component">{{ component_name }}</div>
+                  <div class="version">VERSION: {{ app_version | upper }}</div>
+                  <div class="info">
+                      ✅ Nginx is running successfully<br>
+                      🏠 Host: {{ ansible_hostname | default('Unknown') }}<br>
+                      🌐 OS: {{ ansible_distribution | default('Unknown') }} {{ ansible_distribution_version | default('') }}
+                  </div>
+                  <div class="timestamp">
+                      📅 Deployed: {{ ansible_date_time.iso8601 | default('Unknown') }}
+                  </div>
+              </div>
+          </body>
+          </html>
+        owner: "{{ index_owner }}"
+        group: "{{ index_group }}"
+        mode: '0644'
+
+    - name: Get instance metadata for security group configuration
+      ansible.builtin.uri:
+        url: http://169.254.169.254/latest/meta-data/instance-id
+        method: GET
+        timeout: 5
+      register: instance_id_result
+      ignore_errors: true
+
+    - name: Get security groups for the instance
+      amazon.aws.ec2_instance_info:
+        instance_ids:
+          - "{{ instance_id_result.content }}"
+      register: instance_info
+      delegate_to: localhost
+      when: instance_id_result.content is defined and instance_id_result.content != ""
+
+    - name: Ensure HTTP access in security group
+      amazon.aws.ec2_group:
+        name: "{{ item.security_groups[0].group_name }}"
+        description: "Security group for web server"
+        rules:
+          - proto: tcp
+            ports:
+              - 22
+            cidr_ip: 0.0.0.0/0
+            rule_desc: SSH access
+          - proto: tcp
+            ports:
+              - 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: HTTP access for nginx
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      loop: "{{ instance_info.instances }}"
+      delegate_to: localhost
+      when: instance_info.instances is defined and instance_info.instances | length > 0
+
+    - name: Gather public IP address from AWS metadata
+      ansible.builtin.uri:
+        url: http://169.254.169.254/latest/meta-data/public-ipv4
+        method: GET
+        timeout: 5
+      register: public_ip_result
+      ignore_errors: true
+
+    - name: Set nginx IP (prefer public, fallback to private)
+      ansible.builtin.set_fact:
+        nginx_ip: "{{ public_ip_result.content | default(ansible_default_ipv4.address) | default(ansible_all_ipv4_addresses[0]) | default('localhost') }}"
+
+    - name: Debug network information
+      ansible.builtin.debug:
+        msg: 
+          - "Public IPv4: {{ public_ip_result.content | default('Not available') }}"
+          - "Default IPv4: {{ ansible_default_ipv4.address | default('Not available') }}"
+          - "All IPv4 addresses: {{ ansible_all_ipv4_addresses | default([]) }}"
+          - "Selected IP: {{ nginx_ip }}"
+
+    - name: Display URL to access nginx
+      ansible.builtin.debug:
+        msg: "Nginx is running! Access it at: http://{{ nginx_ip }}"
